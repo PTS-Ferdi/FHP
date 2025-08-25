@@ -1,10 +1,13 @@
+# app.py — PV Climatology Viewer
 import calendar
 from datetime import date
 import io
+
 import matplotlib.pyplot as plt
-import numpy as pd
+import numpy as np
 import pandas as pd
 import streamlit as st
+
 from NINJA_DATA import fetch_renewables_15y, pv_climatologies
 
 st.set_page_config(page_title="PV Climatology Viewer", layout="wide")
@@ -47,6 +50,7 @@ def _fetch_pv(tech, lat, lon, end_date, years, dataset, capacity, system_loss, t
 
 @st.cache_data(show_spinner=False)
 def _compute_clim(pv_df, tz):
+    # returns: monthly_mean, yearly_shape, monthly_hour_profile, monthly_hour_peak, monthly_hour_energy
     return pv_climatologies(pv_df, value_col="electricity", tz=tz)
 
 @st.cache_data(show_spinner=False)
@@ -56,7 +60,9 @@ def _doy_hour_profile(pv_df, tz):
     idx = pd.to_datetime(pv_df.index)
     if idx.tz is None:
         idx = idx.tz_localize("UTC")
-    s.index = idx.tz_convert(tz).sort_index()
+    s.index = idx.tz_convert(tz)
+    s = s.sort_index()  # sort the SERIES
+
     df = s.to_frame("pv")
     df["month_day"] = df.index.strftime("%m-%d")
     df["hour"] = df.index.hour
@@ -70,7 +76,7 @@ def _doy_hour_profile(pv_df, tz):
     return mat  # 365×24
 
 def _fig_yearly_shape(yearly_shape):
-    fig, ax = plt.subplots(figsize=(6, 3))   # compact
+    fig, ax = plt.subplots(figsize=(5.5, 2.7))   # compact
     x = yearly_shape.index.astype(int).tolist()
     y = yearly_shape.values.tolist()
     bars = ax.bar(x, y)
@@ -82,7 +88,7 @@ def _fig_yearly_shape(yearly_shape):
     return fig
 
 def _fig_month(series24, month_name, ylabel="Relative", suffix="(peak-normalized)"):
-    fig, ax = plt.subplots(figsize=(4.2, 2.6))  # compact to fit 3 per row
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))  # smaller to fit better
     x = list(series24.index.astype(int))
     y = series24.values.tolist()
     bars = ax.bar(x, y)
@@ -115,7 +121,7 @@ if run:
 
     # ---------- one compact yearly plot ----------
     st.subheader("Yearly Shape")
-    st.pyplot(_fig_yearly_shape(clim["yearly_shape"]), clear_figure=True)
+    st.pyplot(_fig_yearly_shape(clim["yearly_shape"]), clear_figure=True, use_container_width=True)
 
     # Downloads for yearly
     with st.expander("Download yearly shape (CSV)"):
@@ -130,25 +136,30 @@ if run:
         monthly_matrix = clim["monthly_hour_profile"]; ylabel = "PV"; suffix = "(raw)"
 
     st.subheader(f"Monthly 24h Shapes {suffix}")
-    cols = st.columns(3)
+    cols = st.columns(4)  # 4 columns to fit on screen
     for m in range(1, 13):
+        if m not in monthly_matrix.columns:
+            continue
         s = monthly_matrix[m]
         fig = _fig_month(s, calendar.month_name[m], ylabel=ylabel, suffix=suffix)
-        with cols[(m-1) % 3]:
-            st.pyplot(fig, clear_figure=True)
+        with cols[(m-1) % 4]:
+            st.pyplot(fig, clear_figure=True, use_container_width=True)
 
     # Downloads for monthly matrix
-    with st.expander("Download monthly 24h matrix (CSV, 24×12)"):
-        _csv_button("Download monthly_24h_matrix.csv", monthly_matrix, "pv_monthly_24h_matrix.csv")
+    with st.expander("Download monthly 24h matrices (CSV)"):
+        _csv_button("Selected view (24×12)", monthly_matrix, "pv_monthly_24h_selected.csv")
+        _csv_button("Raw (24×12)", clim["monthly_hour_profile"], "pv_monthly_24h_raw.csv")
+        _csv_button("Peak-normalized (24×12)", clim["monthly_hour_peak"], "pv_monthly_24h_peak.csv")
+        _csv_button("Energy-normalized (24×12)", clim["monthly_hour_energy"], "pv_monthly_24h_energy.csv")
 
     # ---------- day-of-year raw hourly profile (no plotting) ----------
     st.subheader("Day-of-Year Hourly Profile (raw, no plot)")
-    st.caption("Average 365×24 profile across years, in local time. Use the buttons below to download.")
+    st.caption("Average 365×24 profile across years, in local time. Download below.")
     c1, c2 = st.columns(2)
     with c1:
-        _csv_button("Download 365×24 hourly profile (CSV)", doy, "pv_doy_365x24.csv")
+        _csv_button("365×24 hourly profile (CSV)", doy, "pv_doy_365x24.csv")
     with c2:
-        _csv_button("Download daily totals (CSV)", doy.sum(axis=1).rename("daily_total"),
+        _csv_button("Daily totals (CSV)", doy.sum(axis=1).rename("daily_total"),
                     "pv_doy_daily_totals.csv")
 
     st.success("Done. All views were computed once; switching types does not re-fetch.")
