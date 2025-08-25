@@ -10,7 +10,7 @@ import streamlit as st
 
 from NINJA_DATA import fetch_renewables_15y, pv_climatologies
 
-st.set_page_config(page_title="PV Climatology Viewer", layout="wide")
+st.set_page_config(page_title="FHP", layout="wide")
 st.title("PV Climatology Viewer")
 st.caption("Yearly shape + monthly 24h shapes. Computes raw/peak/energy once; no full time series plotting.")
 
