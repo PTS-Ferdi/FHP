@@ -2,6 +2,9 @@ import time, json, requests
 import pandas as pd
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import os, calendar
+import numpy as np
+import matplotlib.pyplot as plt
 
 API_BASE = "https://www.renewables.ninja/api"
 # Put your token here
@@ -95,15 +98,6 @@ def fetch_renewables_15y(
 
 
 
-# === COMPLETE CODE ===
-import os, calendar
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-# ---------------------------------------------------------------------
-# 1) Build climatologies from hourly PV time series spanning many years
-# ---------------------------------------------------------------------
 def pv_climatologies(
     pv_df: pd.DataFrame,
     value_col: str = "electricity",
@@ -111,13 +105,16 @@ def pv_climatologies(
     drop_feb29: bool = True
 ):
     """
+    Build climatologies from an hourly PV time series.
+
     Returns:
-      - monthly_mean:        pd.Series, index=1..12 (months)
-      - yearly_shape:        pd.Series, monthly_mean / annual_mean
+      - monthly_mean:         pd.Series, index=1..12 (months)
+      - yearly_shape_norm:    monthly_mean / annual_mean
+      - yearly_shape_peak:    monthly_mean / max(monthly_mean)
       - monthly_hour_profile: 24 x 12 mean hourly profile by month (raw level)
-      - monthly_hour_peak:     monthly_hour_profile normalized by column max
-      - monthly_hour_energy:   monthly_hour_profile normalized to sum=1 per month
-      - doy_hour_profile:    365 x 24 mean hourly profile for each calendar day (MM-DD)
+      - monthly_hour_peak:    monthly_hour_profile normalized by column max
+      - monthly_hour_energy:  monthly_hour_profile normalized to sum=1 per month
+      - all_hours_raw:        full raw hourly PV series in local time (Series)
     """
     # pick value column
     if value_col not in pv_df.columns:
@@ -133,54 +130,52 @@ def pv_climatologies(
         idx = idx.tz_localize("UTC")
     s.index = idx
 
-    # convert to local time zone to align sun time properly
+    # convert to local time zone to align with local solar time
     s = s.tz_convert(tz).sort_index()
+
+    # full raw series in local time
+    series_local = s.rename("pv")
 
     # tidy frame with calendar keys
     df = s.to_frame("pv")
     df["month"] = df.index.month
     df["hour"] = df.index.hour
-    df["month_day"] = df.index.strftime("%m-%d")
-
     if drop_feb29:
-        df = df[df["month_day"] != "02-29"]
+        md = df.index.strftime("%m-%d")
+        df = df[md != "02-29"]
 
-    # monthly average level and yearly shape
+    # monthly average level
     monthly_mean = df.groupby("month")["pv"].mean()
+
+    # yearly shapes
     annual_mean = monthly_mean.mean()
-    yearly_shape = monthly_mean / annual_mean if annual_mean != 0 else monthly_mean * 0
+    yearly_shape_norm = monthly_mean / annual_mean if annual_mean != 0 else monthly_mean * 0
+    monthly_peak = monthly_mean.max()
+    yearly_shape_peak = monthly_mean / monthly_peak if monthly_peak != 0 else monthly_mean * 0
 
     # monthly 24h profile (raw level)
     monthly_hour_profile = (
-        df.groupby(["month", "hour"])["pv"].mean().unstack("month").sort_index()
+        df.groupby(["month", "hour"])["pv"].mean()
+          .unstack("month")
+          .sort_index()
     )
     monthly_hour_profile.index.name = "hour"
     monthly_hour_profile.columns.name = "month"
 
-    # shapes
-    monthly_hour_peak   = monthly_hour_profile / monthly_hour_profile.max(axis=0)
+    # shapes across the day per month
+    monthly_hour_peak = monthly_hour_profile / monthly_hour_profile.max(axis=0)
     monthly_hour_energy = monthly_hour_profile.div(monthly_hour_profile.sum(axis=0), axis=1)
-
-    # day-of-year x hour (mean over years), rows 'MM-DD', columns 0..23
-    cal = pd.date_range("2001-01-01", "2001-12-31", freq="D").strftime("%m-%d").tolist()
-    if drop_feb29 and "02-29" in cal:
-        cal.remove("02-29")
-
-    doy_hour_profile = (
-        df.groupby(["month_day", "hour"])["pv"].mean()
-          .unstack("hour")
-          .reindex(cal)
-    )
-    doy_hour_profile.index.name = "month_day"
 
     return {
         "monthly_mean": monthly_mean,                 # 12 numbers
-        "yearly_shape": yearly_shape,                 # 12 numbers (normalized)
+        "yearly_shape_norm": yearly_shape_norm,       # normalized by annual mean
+        "yearly_shape_peak": yearly_shape_peak,       # normalized by monthly max
         "monthly_hour_profile": monthly_hour_profile, # 24 x 12
-        "monthly_hour_peak": monthly_hour_peak,       # 24 x 12 (peak=1)
-        "monthly_hour_energy": monthly_hour_energy,   # 24 x 12 (sum=1)
-        "doy_hour_profile": doy_hour_profile          # 365 x 24
+        "monthly_hour_peak": monthly_hour_peak,       # 24 x 12 (peak=1 per month)
+        "monthly_hour_energy": monthly_hour_energy,   # 24 x 12 (sum=1 per month)
+        "all_hours_raw": series_local                 # full raw hourly PV series
     }
+
 
 # ---------------------------------------------------------------------
 # 2) Plot helpers (one figure per plot, bar style with value labels)

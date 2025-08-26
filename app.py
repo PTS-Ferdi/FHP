@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from NINJA_DATA import fetch_renewables_15y, pv_climatologies
+# ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="FHP", layout="wide")
 st.title("FHP")
 
@@ -41,6 +42,7 @@ with st.sidebar:
     )
 
     run = st.button("Run")
+
 
 # ---------------- Helpers ----------------
 @st.cache_data(show_spinner=False)
@@ -119,6 +121,7 @@ def _csv_button_with_count(label_prefix, df_or_series, filename):
     label = f"{label_prefix} ({n:,})"
     st.download_button(label, data=data, file_name=filename, mime="text/csv")
 
+
 # ---------------- Main ----------------
 if run:
     with st.spinner("Fetching PV and computing climatologies…"):
@@ -184,8 +187,7 @@ if run:
         daily_totals = doy.sum(axis=1).rename("daily_total")
         _csv_button_with_count("Daily totals CSV", daily_totals, "pv_doy_daily_totals.csv")
 
-        # 3) all days × hours (raw, flattened)
-        # Use the raw localized series from climatologies to ensure it's truly "all hours"
+        # 3) all days × hours (raw, flattened) — use the raw localized series
         all_hours = clim["all_hours_raw"]
         _csv_button_with_count("All days × hours (raw) CSV", all_hours, "pv_all_days_hours_raw.csv")
 
