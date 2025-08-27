@@ -12,7 +12,6 @@ from NINJA_DATA import fetch_renewables_15y, pv_climatologies
 st.set_page_config(page_title="FHP", layout="wide")
 st.title("FHP")
 
-# ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("Inputs")
     lat = st.number_input("Latitude", value=48.14, format="%.5f")
@@ -121,8 +120,6 @@ def _csv_button_with_count(label_prefix, df_or_series, filename):
     label = f"{label_prefix} ({n:,})"
     st.download_button(label, data=data, file_name=filename, mime="text/csv")
 
-
-# ---------------- Main ----------------
 if run:
     with st.spinner("Fetching PV and computing climatologies…"):
         pv_de = _fetch_pv(
@@ -135,7 +132,6 @@ if run:
         clim = _compute_clim(pv_de, tz)
         doy = _doy_hour_profile(pv_de, tz)  # 365×24 raw “average day by day”
 
-    # ---------- Yearly shape (choose which to show) ----------
     st.subheader("Yearly Shape")
     if yearly_view == "Annual-mean normalized":
         ys = clim["yearly_shape_norm"]
@@ -145,7 +141,6 @@ if run:
         title = "PV Yearly Shape (monthly / peak month)"
     st.pyplot(_fig_yearly_shape(ys, title), clear_figure=True, use_container_width=True)
 
-    # Downloads for yearly (both options together)
     with st.expander("Download yearly shapes (CSV)"):
         _csv_button("Yearly shape — annual-mean normalized", clim["yearly_shape_norm"], "pv_yearly_shape_norm.csv")
         _csv_button("Yearly shape — peak-normalized", clim["yearly_shape_peak"], "pv_yearly_shape_peak.csv")
@@ -160,7 +155,7 @@ if run:
         monthly_matrix = clim["monthly_hour_profile"]; ylabel = "PV"; suffix = "(raw)"
 
     st.subheader(f"Monthly 24h Shapes {suffix}")
-    cols = st.columns(4)  # 4 columns to fit on screen
+    cols = st.columns(4)  
     for m in range(1, 13):
         if m not in monthly_matrix.columns:
             continue
@@ -176,8 +171,7 @@ if run:
         _csv_button("Peak-normalized (24×12)", clim["monthly_hour_peak"], "pv_monthly_24h_peak.csv")
         _csv_button("Energy-normalized (24×12)", clim["monthly_hour_energy"], "pv_monthly_24h_energy.csv")
 
-    # ---------- Day-of-Year Hourly Profile (downloads only) ----------
-    st.subheader("Day-of-Year Hourly Profile (raw, no plot)")
+    st.subheader("Day-of-Year Hourly Profile (raw)")
     st.caption("Average 365×24 profile across years, in local time. Downloads below.")
     with st.expander("Download (three options)"):
         # 1) full 365×24 matrix
