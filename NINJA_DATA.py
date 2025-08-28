@@ -7,26 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 API_BASE = "https://www.renewables.ninja/api"
-# Put your token here
 API_TOKEN = "d8347c8ab55103acfae94d65de8d36803a2a69b6"
 HEADERS = {"Authorization": f"Token {API_TOKEN}"}
 
-def fetch_renewables_15y(
-    technology: str, lat: float, lon: float,
-    end_date: str = "2023-12-31",   # set to the latest your account supports
-    years: int = 30,
-    dataset: str = "merra2",
-    capacity: float = 1.0,
-    system_loss: float = 0.0,
-    tracking: int = 0, tilt: int = 35, azim: int = 180,
-    height: int = 80, turbine: str = "Vestas V80 2000",
-    sleep_s: float = 1.1,           # polite rate-limit spacing
-) -> pd.DataFrame:
-    """
-    Fetch ~30 years of hourly site-level PV/Wind 'electricity' (kW) for a point.
-    Returns a UTC-indexed DataFrame with an 'electricity' column.
-    """
-
+def fetch_renewables_15y(technology: str, lat: float, lon: float,end_date: str = "2023-12-31",  years: int = 30,dataset: str = "merra2",capacity: float = 1.0,system_loss: float = 0.0,tracking: int = 0, tilt: int = 35, azim: int = 180,height: int = 80, turbine: str = "Vestas V80 2000",sleep_s: float = 1.1,) -> pd.DataFrame:
     tech = technology.lower().strip()
     if tech == "solar":
         url = f"{API_BASE}/data/pv"
@@ -37,9 +21,8 @@ def fetch_renewables_15y(
     else:
         raise ValueError("technology must be 'Solar', 'Onshore Wind', or 'Offshore Wind'")
 
-    # Calculate start date = (end_date - years)
     end_dt = pd.to_datetime(end_date).normalize()
-    start_dt = end_dt - relativedelta(years=years) + timedelta(days=1)  # inclusive window
+    start_dt = end_dt - relativedelta(years=years) + timedelta(days=1) 
 
     all_frames = []
     y0 = start_dt.year
@@ -56,19 +39,15 @@ def fetch_renewables_15y(
             "dataset": dataset,
             "capacity": capacity,
             "format": "json",
-            "header": "true",        # ensures JSON has {'data', 'metadata'}
-            "interpolate": "true",   # default; ok to omit
-            # "local_time": "false"  # keep UTC; add "true" if you also want local_time column
-        }
+            "header": "true",      
+            "interpolate": "true"}
         params.update(extra)
 
-        # Simple retry with backoff for 429s
         backoff = 1.0
         for attempt in range(6):
             r = session.get(url, params=params, timeout=120)
             if r.status_code == 200:
                 payload = r.json()
-                # 'data' is a dict keyed by timestamps -> use orient='index'
                 df = pd.read_json(json.dumps(payload["data"]), orient="index")
                 df.index = pd.to_datetime(df.index, utc=True)
                 df = df.rename_axis("time").sort_index()
@@ -77,66 +56,40 @@ def fetch_renewables_15y(
                 time.sleep(backoff)
                 backoff = min(backoff * 1.7, 10)
                 continue
-            # Helpful error for out-of-range dates
             raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
         raise RuntimeError("Rate limit: gave up after multiple retries.")
 
-    # Loop in year-sized chunks (Ninja caps requests to ≤1y)
     cur_start = start_dt
     while cur_start <= end_dt:
         cur_end = min(cur_start + relativedelta(years=1) - timedelta(days=1), end_dt)
         df_chunk = fetch_one(cur_start, cur_end)
         all_frames.append(df_chunk)
-        time.sleep(sleep_s)  # respect burst limits
+        time.sleep(sleep_s)  
         cur_start = cur_end + timedelta(days=1)
 
     out = pd.concat(all_frames).sort_index()
-    # Column is usually 'electricity' (kW avg over the hour). Keep as-is.
-    # If duplicate times occur (rare), keep the last
     out = out[~out.index.duplicated(keep="last")]
     return out
 
 
 
-def pv_climatologies(
-    pv_df: pd.DataFrame,
-    value_col: str = "electricity",
-    tz: str = "Europe/Berlin",
-    drop_feb29: bool = True
-):
-    """
-    Build climatologies from an hourly PV time series.
-
-    Returns:
-      - monthly_mean:         pd.Series, index=1..12 (months)
-      - yearly_shape_norm:    monthly_mean / annual_mean
-      - yearly_shape_peak:    monthly_mean / max(monthly_mean)
-      - monthly_hour_profile: 24 x 12 mean hourly profile by month (raw level)
-      - monthly_hour_peak:    monthly_hour_profile normalized by column max
-      - monthly_hour_energy:  monthly_hour_profile normalized to sum=1 per month
-      - all_hours_raw:        full raw hourly PV series in local time (Series)
-    """
-    # pick value column
+def pv_climatologies(pv_df: pd.DataFrame,value_col: str = "electricity",tz: str = "Europe/Berlin",drop_feb29: bool = True):
     if value_col not in pv_df.columns:
         num_cols = pv_df.select_dtypes(include=[np.number]).columns
         if len(num_cols) == 0:
             raise ValueError("No numeric column found; specify value_col explicitly.")
         value_col = num_cols[0]
 
-    # ensure tz-aware index; treat naive as UTC
     s = pv_df[value_col].copy()
     idx = pd.to_datetime(pv_df.index)
     if idx.tz is None:
         idx = idx.tz_localize("UTC")
     s.index = idx
 
-    # convert to local time zone to align with local solar time
     s = s.tz_convert(tz).sort_index()
 
-    # full raw series in local time
     series_local = s.rename("pv")
 
-    # tidy frame with calendar keys
     df = s.to_frame("pv")
     df["month"] = df.index.month
     df["hour"] = df.index.hour
@@ -144,25 +97,16 @@ def pv_climatologies(
         md = df.index.strftime("%m-%d")
         df = df[md != "02-29"]
 
-    # monthly average level
     monthly_mean = df.groupby("month")["pv"].mean()
-
-    # yearly shapes
     annual_mean = monthly_mean.mean()
     yearly_shape_norm = monthly_mean / annual_mean if annual_mean != 0 else monthly_mean * 0
     monthly_peak = monthly_mean.max()
     yearly_shape_peak = monthly_mean / monthly_peak if monthly_peak != 0 else monthly_mean * 0
 
-    # monthly 24h profile (raw level)
-    monthly_hour_profile = (
-        df.groupby(["month", "hour"])["pv"].mean()
-          .unstack("month")
-          .sort_index()
-    )
+    monthly_hour_profile = (df.groupby(["month", "hour"])["pv"].mean().unstack("month").sort_index())
     monthly_hour_profile.index.name = "hour"
     monthly_hour_profile.columns.name = "month"
 
-    # shapes across the day per month
     monthly_hour_peak = monthly_hour_profile / monthly_hour_profile.max(axis=0)
     monthly_hour_energy = monthly_hour_profile.div(monthly_hour_profile.sum(axis=0), axis=1)
 
@@ -176,10 +120,6 @@ def pv_climatologies(
         "all_hours_raw": series_local                 # full raw hourly PV series
     }
 
-
-# ---------------------------------------------------------------------
-# 2) Plot helpers (one figure per plot, bar style with value labels)
-# ---------------------------------------------------------------------
 def bar_with_labels(x, y, title, xlabel, ylabel, rotation=0, fmt="{:.2f}", save_path=None):
     fig, ax = plt.subplots()
     bars = ax.bar(x, y)
@@ -196,26 +136,18 @@ def bar_with_labels(x, y, title, xlabel, ylabel, rotation=0, fmt="{:.2f}", save_
     plt.show()
 
 def plot_yearly_shape(yearly_shape: pd.Series, save_path: str | None = None):
-    x = yearly_shape.index.astype(int).tolist()     # 1..12
+    x = yearly_shape.index.astype(int).tolist()     
     y = yearly_shape.values.tolist()
-    bar_with_labels(x, y,
-        "PV Yearly Shape (monthly / annual mean)", "Month", "Relative level",
-        fmt="{:.2f}", save_path=save_path
-    )
+    bar_with_labels(x, y,"PV Yearly Shape (monthly / annual mean)", "Month", "Relative level",fmt="{:.2f}", save_path=save_path)
 
-def plot_monthly_shapes(
-    monthly_profile: pd.DataFrame,      # 24 x 12 (choose raw/peak/energy)
-    label: str = "Relative",            # y-axis label
-    title_suffix: str = "",             # e.g., "(peak-normalized)"
-    out_dir: str | None = None
-):
+def plot_monthly_shapes(monthly_profile: pd.DataFrame,label: str = "Relative",title_suffix: str = "",out_dir: str | None = None):
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     for m in range(1, 13):
         if m not in monthly_profile.columns:
             continue
-        s = monthly_profile[m]              # 24 values for this month
-        x = list(s.index.astype(int))       # hours 0..23
+        s = monthly_profile[m]           
+        x = list(s.index.astype(int))     
         y = s.values.tolist()
         title = f"Average 24h Shape – {calendar.month_name[m]} {title_suffix}".strip()
         save_path = os.path.join(out_dir, f"pv_shape_{m:02d}.png") if out_dir else None

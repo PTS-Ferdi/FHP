@@ -1,4 +1,3 @@
-# app.py — PV Climatology Viewer
 import calendar
 from datetime import date
 import io
@@ -6,9 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
-
 from NINJA_DATA import fetch_renewables_15y, pv_climatologies
-# ---------------- Streamlit UI ----------------
+
 st.set_page_config(page_title="FHP", layout="wide")
 st.title("FHP")
 
@@ -42,8 +40,6 @@ with st.sidebar:
 
     run = st.button("Run")
 
-
-# ---------------- Helpers ----------------
 @st.cache_data(show_spinner=False)
 def _fetch_pv(tech, lat, lon, end_date, years, dataset, capacity, system_loss, tracking, tilt, azim):
     return fetch_renewables_15y(
@@ -65,22 +61,20 @@ def _doy_hour_profile(pv_df, tz):
     if idx.tz is None:
         idx = idx.tz_localize("UTC")
     s.index = idx.tz_convert(tz)
-    s = s.sort_index()  # sort the SERIES
+    s = s.sort_index() 
 
     df = s.to_frame("pv")
     df["month_day"] = df.index.strftime("%m-%d")
     df["hour"] = df.index.hour
-    # drop Feb 29 so we get 365 unique days
     df = df[df["month_day"] != "02-29"]
     mat = df.groupby(["month_day", "hour"])["pv"].mean().unstack("hour")
-    # reorder to calendar
     cal = pd.date_range("2001-01-01", "2001-12-31", freq="D").strftime("%m-%d")
     mat = mat.reindex(cal)
     mat.index.name = "month_day"
-    return mat  # 365×24
+    return mat  
 
 def _fig_yearly_shape(series, title="PV Yearly Shape"):
-    fig, ax = plt.subplots(figsize=(5.5, 2.7))   # compact
+    fig, ax = plt.subplots(figsize=(5.5, 2.7))  
     x = series.index.astype(int).tolist()
     y = series.values.tolist()
     bars = ax.bar(x, y)
@@ -92,7 +86,7 @@ def _fig_yearly_shape(series, title="PV Yearly Shape"):
     return fig
 
 def _fig_month(series24, month_name, ylabel="Relative", suffix="(peak-normalized)"):
-    fig, ax = plt.subplots(figsize=(3.6, 2.4))  # smaller to fit better
+    fig, ax = plt.subplots(figsize=(3.6, 2.4)) 
     x = list(series24.index.astype(int))
     y = series24.values.tolist()
     bars = ax.bar(x, y)
@@ -130,7 +124,7 @@ if run:
             tracking=tracking, tilt=tilt, azim=azim
         )
         clim = _compute_clim(pv_de, tz)
-        doy = _doy_hour_profile(pv_de, tz)  # 365×24 raw “average day by day”
+        doy = _doy_hour_profile(pv_de, tz) 
 
     st.subheader("Yearly Shape")
     if yearly_view == "Annual-mean normalized":
@@ -146,7 +140,6 @@ if run:
         _csv_button("Yearly shape — peak-normalized", clim["yearly_shape_peak"], "pv_yearly_shape_peak.csv")
         _csv_button("Monthly mean (kW or scaled unit)", clim["monthly_mean"], "pv_monthly_mean.csv")
 
-    # ---------- Monthly 24h shapes ----------
     if view == "Peak-normalized":
         monthly_matrix = clim["monthly_hour_peak"]; ylabel = "Relative"; suffix = "(peak-normalized)"
     elif view == "Energy-normalized":
@@ -164,7 +157,6 @@ if run:
         with cols[(m-1) % 4]:
             st.pyplot(fig, clear_figure=True, use_container_width=True)
 
-    # Downloads for monthly matrices
     with st.expander("Download monthly 24h matrices (CSV)"):
         _csv_button("Selected view (24×12)", monthly_matrix, "pv_monthly_24h_selected.csv")
         _csv_button("Raw (24×12)", clim["monthly_hour_profile"], "pv_monthly_24h_raw.csv")
@@ -173,15 +165,11 @@ if run:
 
     st.subheader("Day-of-Year Hourly Profile (raw)")
     st.caption("Average 365×24 profile across years, in local time. Downloads below.")
-    with st.expander("Download (three options)"):
-        # 1) full 365×24 matrix
-        _csv_button_with_count("365×24 hourly matrix CSV", doy, "pv_doy_365x24.csv")
 
-        # 2) daily totals (365 values)
+    with st.expander("Download (three options)"):
+        _csv_button_with_count("365×24 hourly matrix CSV", doy, "pv_doy_365x24.csv")
         daily_totals = doy.sum(axis=1).rename("daily_total")
         _csv_button_with_count("Daily totals CSV", daily_totals, "pv_doy_daily_totals.csv")
-
-        # 3) all days × hours (raw, flattened) — use the raw localized series
         all_hours = clim["all_hours_raw"]
         _csv_button_with_count("All days × hours (raw) CSV", all_hours, "pv_all_days_hours_raw.csv")
 
